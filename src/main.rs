@@ -1,5 +1,9 @@
 use regex::Regex;
-use std::{cmp::Ordering::{Greater, Less}, io::{Write, stdin, stdout}};
+use std::{
+    cmp::Ordering::{Greater, Less},
+    collections::HashMap,
+    io::{stdin, stdout, Write},
+};
 
 fn main() {
     loop {
@@ -9,8 +13,16 @@ fn main() {
         stdin().read_line(&mut string).unwrap();
         let equation = ChemEquation::parse_str(string.as_str());
         match equation {
-            Ok(eq) => println!("{:?}", equation),
-            Err(e) => println!("Error: {}", e)
+            Ok(eq) => {
+                println!(
+                    "{}",
+                    match eq.is_balanced() {
+                        true => "balanced",
+                        false => "not balanced",
+                    }
+                );
+            }
+            Err(e) => println!("Error: {}", e),
         }
     }
 }
@@ -22,7 +34,7 @@ struct ChemMolecule {
 #[derive(Clone, Debug)]
 struct ChemToken {
     multiple: u32,
-    term: Vec<ChemMolecule>,
+    terms: Vec<ChemMolecule>,
 }
 
 #[derive(Clone, Debug)]
@@ -33,40 +45,35 @@ struct ChemEquation {
 
 impl ChemEquation {
     fn parse_side(s: &str) -> Result<Vec<ChemToken>, String> {
-        let mut tokens: Vec<_> = vec![];
-        for token_str in s.split("+").map(|x| x.trim()) {
-            let mut token = ChemToken {
-                multiple: 0,
-                term: vec![],
-            };
-            let mut molecule = ChemMolecule {
-                multiple: 0,
-                name: String::new()
-            };
-            for (i, char) in token_str.chars().enumerate() {
-                if char.is_numeric() {
-                    if i == 0 {
-                        token.multiple = token.multiple * 10 + char.to_digit(10).unwrap();
-                    } else {
-                        molecule.multiple = molecule.multiple * 10 + char.to_digit(10).unwrap();
-                    }
-                } else if char.is_ascii_alphabetic() {
-                    if char.is_uppercase() {
-                        molecule.name = char.to_string();
-                    } else {
-                        if molecule.multiple == 0 {
-                            molecule.multiple = 1;
+        let re = Regex::new(r"(?:(\d*)([A-Z]{1}[a-z]{0,2})(\d*))").unwrap();
+        let tokens = s
+            .split("+")
+            .map(|token_str| {
+                let token_str = token_str.trim();
+                let mut term_multiple = 1u32;
+                let molecules = re
+                    .captures_iter(token_str)
+                    .map(|x| {
+                        if let Some(mul) = x.get(1) {
+                            if let Ok(val) = mul.as_str().parse() {
+                                term_multiple = val;
+                            }
                         }
-                        molecule.name.push(char);
-                        token.term.push(molecule.clone());
-                    }
-                } else {
-                    return Err(format!("Unexpected token \"{}\" at {}", char, i + 1));
+                        let name = String::from(&x[2]);
+                        let multiple = if let Some(mul) = x.get(3) {
+                            mul.as_str().parse().unwrap_or(1u32)
+                        } else {
+                            1u32
+                        };
+                        ChemMolecule { name, multiple }
+                    })
+                    .collect();
+                ChemToken {
+                    terms: molecules,
+                    multiple: term_multiple,
                 }
-            }
-            if token.multiple == 0 { token.multiple = 1; }
-            tokens.push(token);
-        }
+            })
+            .collect();
         Ok(tokens)
     }
     fn parse_str(s: &str) -> Result<Self, String> {
@@ -81,5 +88,20 @@ impl ChemEquation {
                 Ok(ChemEquation { lhs, rhs })
             }
         }
+    }
+    fn yes(side: &Vec<ChemToken>) -> HashMap<&String, u32> {
+        let mut map = HashMap::new();
+        for i in side.iter() {
+            for j in i.terms.iter() {
+                let count = map.entry(&j.name).or_insert(0);
+                *count += i.multiple * j.multiple;
+            }
+        }
+        map
+    }
+    fn is_balanced(self) -> bool {
+        let lhs_map = ChemEquation::yes(&self.lhs);
+        let rhs_map = ChemEquation::yes(&self.rhs);
+        lhs_map == rhs_map
     }
 }
